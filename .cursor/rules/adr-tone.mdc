@@ -1,0 +1,88 @@
+---
+description: Tone used when writing instructions
+globs:
+alwaysApply: true
+---
+# ADR Tone Guidelines for Cursor Rules
+
+When writing Architecture Decision Records (ADRs) for cursor rules, follow these tone guidelines to ensure clarity and accessibility for other developers:
+
+## Core Tone Principles
+
+### 1. **Third-Person Perspective**
+- Write from an objective, third-person perspective
+- Avoid "we," "our," "us" - these ADRs will be consumed by other teams
+- Use "the project," "the team," "developers," or "users" instead
+
+### 2. **Clear and Direct Language**
+- Use active voice and present tense
+- Be concise but comprehensive
+- Avoid jargon unless necessary, and define technical terms when used
+- Write for developers who may not be familiar with the specific context
+
+### 3. **Objective and Factual**
+- Present decisions as facts, not opinions
+- Include concrete reasoning and evidence
+- Acknowledge trade-offs and limitations honestly
+- Avoid marketing language or subjective claims
+
+### 4. **Educational and Informative**
+- Explain the "why" behind decisions, not just the "what"
+- Provide enough context for future developers to understand the reasoning
+- Include relevant background information and constraints
+- Reference external resources when appropriate
+
+## Language Guidelines
+
+### Do Use:
+- "The project requires..."
+- "Developers need to..."
+- "This approach provides..."
+- "The decision enables..."
+- "The solution addresses..."
+
+### Avoid:
+- "We decided to..."
+- "Our team chose..."
+- "We believe this is..."
+- "Our approach..."
+- "We think..."
+
+## Structure and Format
+
+### Context Section:
+- Describe the problem or situation objectively
+- Include relevant constraints and requirements
+- Explain why this decision matters
+
+### Decision Section:
+- State the decision clearly and definitively
+- Use present tense: "The project will use..." not "The project decided to use..."
+- Be specific about what was chosen and why
+
+### Consequences Section:
+- List both positive and negative outcomes
+- Include immediate and long-term implications
+- Mention any risks or limitations
+
+## Examples
+
+### Good:
+"The project requires a standardized approach to cursor rule documentation to ensure consistency across development teams."
+
+### Avoid:
+"We decided to standardize our cursor rule documentation to make it easier for our team."
+
+### Good:
+"Developers implementing cursor rules should follow this pattern to maintain consistency and improve maintainability."
+
+### Avoid:
+"Our team should follow this pattern because we think it's better."
+
+## Additional Considerations
+
+- **Timelessness**: Write as if the decision is current and relevant
+- **Accessibility**: Consider developers from different backgrounds and experience levels
+- **Completeness**: Provide enough detail for someone to understand and potentially replicate the decision-making process
+- **Neutrality**: Present alternatives fairly, even if they were rejected
+

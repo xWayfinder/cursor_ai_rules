@@ -1,0 +1,607 @@
+# Domain Driven Design Backend Architecture using Typescript, TRPc and Zod
+version: 1.0.0
+
+## Why This Architecture Matters
+
+### The Problem We're Solving
+
+Traditional architectures face several challenges that this DDD approach addresses:
+
+1. Business Logic Scattered Everywhere - Core business rules mixed with infrastructure
+2. Tight Coupling - Changes in one area breaking unrelated functionality
+3. Testing Difficulties - Business logic entangled with infrastructure
+4. Knowledge Silos - Limited understanding of system parts
+5. Refactoring Challenges - Changes requiring full system understanding
+
+### The Investment Payoff
+
+- Easier Intervention - Clean organization makes LLM-written code more comprehensible
+- Faster Development - Established patterns speed up feature implementation
+- Easier Maintenance - Isolated changes reduce system-wide impacts
+- Better Testing - Independent business logic testing
+- Improved Collaboration - Clear boundaries enable parallel development
+- Scalability - Architecture scales technically and organizationally
+
+## File Structure
+
+```
+@server/
+├── access-controls/
+│   ├── auth/                  # Configuration for service like auth0
+│   └── permissions/           # Permission logic
+├── routers/                   # TRPC request handlers (API endpoints)
+├── dto/                       # Output types - zod based dtos
+├── controller/                # Request processing and authorization
+├── app-services/              # Use case orchestration
+├── domains/                   # Domain-specific business logic
+│   └── <domain>/
+│       ├── schema/            # Domain-specific database schema
+│       │   └── tables.prisma  # Prisma table definitions
+│       ├── mappers/           # Entity ↔ Schema conversions
+│       │   ├── to-dto.mapper.ts
+│       │   ├── from-dto.mapper.ts
+│       │   ├── to-orm.mapper.ts
+│       │   └── from-orm.mapper.ts
+│       ├── entities/          # Domain entities and aggregate roots
+│       │   └── <root-entity>.entity.ts
+│       ├── services/          # Domain-specific business logic
+│       │   └── <domain>.service.ts
+│       └── repository/        # Data persistence layer
+│           └── <entity>.repository.ts
+└── database/                  # Database configuration and migrations
+    ├── config.ts             # Database connection and settings
+    ├── schema.prisma         # Domain agnostic Prisma schema
+    └── migrations/           # All database migrations
+        └── YYYYMMDDHHMMSS_<description>.ts
+```
+
+## Component Rules
+
+### 1. Authentication (`@server/access-controls/auth/`)
+
+Purpose: Protect sensitive data and operations by verifying user identities before granting access.
+
+Responsibilities:
+- Configure external auth providers (e.g., Auth0)
+- Implement secure session management
+- Handle token validation and refresh
+- Implement MFA when required
+
+DO:
+- Use established authentication providers
+- Implement proper session management
+- Follow security best practices
+- Log authentication attempts
+
+DON'T:
+- Mix authentication with business logic
+- Store sensitive credentials in code
+- Implement custom crypto
+- Bypass authentication middleware
+
+Example:
+```typescript
+// auth0.middleware.ts
+export const requireAuth = t.middleware(async ({ ctx, next }) => {
+  const token = ctx.req.headers.authorization;
+  if (!token) throw new UnauthorizedError();
+
+  const user = await validateToken(token);
+  return next({ ctx: { ...ctx, user } });
+});
+```
+
+### 2. Permissions (`@server/access-controls/permissions/`)
+
+Purpose: Ensure users can only access resources they are authorized to use.
+
+Responsibilities:
+- Define granular permission rules
+- Enforce access control policies
+- Maintain audit trails
+- Handle role-based access
+
+DO:
+- Define granular permission rules
+- Use role-based or attribute-based access control
+- Centralize permission logic
+- Support audit logging
+
+DON'T:
+- Scatter permission checks throughout code
+- Mix permissions with business logic
+- Hardcode role checks
+- Skip permission validation
+
+Example:
+```typescript
+// user-management.permissions.ts
+export const userPermissions = {
+  canCreateUser: async (ctx: Context) => {
+    return ctx.user.hasRole('ADMIN') ||
+           ctx.user.hasPermission('user.create');
+  }
+};
+```
+
+### 3. TRPC Routers (`@server/routers/`)
+
+Purpose: Provide a secure and organized entry point for client-server communication.
+
+Responsibilities:
+- Handle client-server communication
+- Verify authentication
+- Validate input data
+
+DO:
+- Use TRPC's procedure builder for type-safe endpoints
+- Keep procedures thin, delegating to controllers
+- Group related routes in the same file
+- Use input validation inline on the route using zod
+
+DON'T:
+- Put business logic in routers
+- Access repositories directly
+- Perform complex transformations
+- Mix unrelated routes in the same file
+- Skip input validation
+
+Example:
+```typescript
+// user.auth.router.ts
+export const userAuthRouter = router({
+  register: publicProcedure
+    .input(z.object({
+      email: z.string().email(),
+      password: z.string().min(8),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      return userRegisterController.register(input, ctx);
+    }),
+});
+```
+
+### 4. DTOs (`@server/dto/`)
+
+Purpose: Define standardized data contracts between server and client.
+
+Responsibilities:
+- Define data transfer objects using Zod
+- Ensure type safety
+- Handle API versioning
+- Maintain backwards compatibility
+
+DO:
+- Use Zod for schema definition
+- Keep DTOs focused and simple
+- Version DTOs appropriately
+- Document breaking changes
+
+DON'T:
+- Mix input and output schemas
+- Include business logic in schemas
+- Reference domain entities directly
+- Use type-only definitions without Zod
+
+```typescript
+// @server/dto/user.profile.dto.ts
+export const userProfileDtoSchema = z.object({
+  id: z.string(),
+  email: z.string(),
+  name: z.string(),
+  createdAt: z.date(),
+});
+```
+
+### 5. Controllers (`@server/controller/`)
+
+Purpose: Bridge external requests and internal business logic.
+
+Responsibilities:
+- Transform request data
+- Handle authorization
+- Route to appropriate services
+- Format responses
+
+DO:
+- Keep controllers thin
+- Use proper error handling
+- Validate permissions
+- Use mappers for conversion
+
+DON'T:
+- Include business logic
+- Access repositories directly
+- Perform complex data transformations
+- Mix concerns from multiple domains
+
+Example:
+```typescript
+// user.register.controller.ts
+export class UserRegisterController {
+
+  constructor(
+    private readonly userMapper: UserMapper,
+    private readonly userRegistrationService: UserRegistrationService,
+    private readonly authService: AuthService
+  ) {}
+
+  static new(
+    userMapper: UserMapper,
+    userRegistrationService: UserRegistrationService,
+    authService: AuthService
+  ) {
+    return new UserRegisterController(userMapper, userRegistrationService, authService);
+  }
+
+  async register(input: UserRegisterInput, ctx: Context) {
+    await this.authService.checkPermissions(ctx, 'user.register');
+    const userEntity = await this.userMapper.fromDto(input);
+    const result = await this.userRegistrationService.register(userEntity);
+    return this.userMapper.toDto(result);
+  }
+}
+```
+
+### 6. App Services (`@server/app-services/`)
+
+Purpose: Orchestrate complex operations across multiple domains.
+
+Responsibilities:
+- Coordinate domain services
+- Manage transactions
+- Handle cross-domain operations
+- Maintain consistency
+
+DO:
+- Orchestrate across multiple domains
+- Handle transactions
+- Maintain domain boundaries
+- Use domain services for core logic
+
+DON'T:
+- Include domain logic
+- Access repositories directly
+- Skip error handling
+- Mix infrastructure concerns
+- Bypass domain services
+
+Example:
+```typescript
+// user-registration.app-service.ts
+export class UserRegistrationService {
+  constructor(
+    private readonly userDomainService: UserDomainService,
+    private readonly notificationDomainService: NotificationDomainService
+  ) {}
+
+  static new(
+    userDomainService: UserDomainService,
+    notificationDomainService: NotificationDomainService
+  ) {
+    return new UserRegistrationService(userDomainService, notificationDomainService);
+  }
+
+  async register(user: UserEntity) {
+    return this.db.transaction(async () => {
+      const newUser = await this.userDomainService.createUser(user);
+      await this.notificationDomainService.sendWelcomeEmail(newUser);
+      return newUser;
+    });
+  }
+}
+```
+
+### 7. Domain Services (`@server/domains/<domain>/services/`)
+
+Purpose: Implement core business logic for the domain.
+
+Responsibilities:
+- Execute domain operations
+- Enforce business rules
+- Maintain domain consistency
+- Handle domain events
+
+DO:
+- Implement core business logic
+- Enforce domain invariants
+- Maintain aggregate consistency
+
+DON'T:
+- Access other domains directly
+- Include infrastructure concerns
+- Expose internal domain details
+- Skip validation
+
+
+### 8. Entities (`@server/domains/<domain>/entities/`)
+Purpose: Model core business concepts and their rules.
+
+Responsibilities:
+- Encapsulate business rules
+- Maintain internal consistency
+- Validate state changes
+- Emit domain events
+
+DO:
+- Implement business logic methods
+- Validate state changes
+- Use strong typing
+- Keep entities focused
+
+DON'T:
+- Include persistence logic
+- Reference other domains
+- Expose internal state
+- Skip validation
+- Mix domain concerns
+
+Example:
+```typescript
+// domains/user/entities/user.entity.ts
+interface UserProps {
+  id?: string;
+  email?: string;
+  password?: string;
+  roles?: string[];
+}
+
+
+export class UserEntity {
+  private id?: string;
+  private email?: string;
+  private password?: string;
+  private roles?: string[];
+
+  constructor(private readonly props: UserProps) {
+    this.id = props.id;
+    this.email = props.email;
+    this.password = props.password;
+    this.roles = props.roles;
+  }
+
+  public get id(): string {
+    return this.id;
+  }
+  public get email(): string {
+    return this.email;
+  }
+  public get password(): string {
+    return this.password;
+  }
+  public get roles(): string[] {
+    return this.roles;
+  }
+
+  public set email(email: string) {
+    this.email = email;
+  }
+
+  public set password(password: string) {
+    this.password = password;
+  }
+
+  public addRole(role: string) {
+    if (this.roles.includes(role)) throw new Error('Role already added');
+    this.roles.push(role);
+  }
+
+  public removeRole(role: string) {
+    if (!this.roles.includes(role)) throw new Error('Role not found');
+    this.roles = this.roles.filter(r => r !== role);
+  }
+}
+```
+### 9. Repositories (`@server/domains/<domain>/repository/`)
+Purpose: Handle data persistence for domain entities.
+
+Responsibilities:
+- Manage entity persistence
+- Handle transactions
+- Maintain data consistency
+- Use proper mapping
+
+DO:
+- Use domain types
+- Handle transactions properly
+- Maintain consistency
+- Use mappers correctly
+
+DON'T:
+- Return raw database records
+- Mix multiple aggregates
+- Expose ORM details
+- Skip proper mapping
+
+Example:
+```typescript
+// domains/user/repository/user.repository.ts
+export class UserRepository {
+  constructor(
+    private readonly userMapper: UserMapper,
+    private readonly db: PrismaClient
+  ) {}
+
+  static new(
+    userMapper: UserMapper,
+    db: PrismaClient
+  ) {
+    return new UserRepository(userMapper, db);
+  }
+
+  async save(user: UserEntity): Promise<UserEntity> {
+    // Convert entity to ORM model
+    const ormModel = this.userMapper.toOrm(user);
+
+    try {
+
+      // Persist with optimistic locking
+      const saved = await this.db.$transaction(async (tx) => {
+        const current = await tx.user.findUnique({
+          where: { id: ormModel.id }
+        });
+
+        if (current?.version !== ormModel.version) {
+          throw new ConcurrencyError();
+        }
+
+        return tx.user.upsert({
+          where: { id: ormModel.id },
+          create: ormModel,
+          update: { ...ormModel, version: ormModel.version + 1 }
+        });
+      });
+
+      // Convert back to entity
+      return this.userMapper.fromOrm(saved);
+    } catch (error) {
+      throw new PersistenceError(error as Error);
+    }
+  }
+}
+```
+
+### 10. Mappers (`@server/domains/<domain>/mappers/`)
+Purpose: Transform data between different representations.
+
+Responsibilities:
+- Convert between formats
+- Handle type transformations
+- Maintain compatibility
+- Ensure data integrity
+
+DO:
+- Keep transformations simple
+- Handle all edge cases
+- Maintain compatibility
+- Use proper typing
+
+DON'T:
+- Include business logic
+- Skip error handling
+- Mix mapping concerns
+- Use type assertions
+
+Example:
+```typescript
+// domains/user/mappers/to-dto.mapper.ts
+export class UserMapper {
+  toDto(entity: UserEntity): UserProfileDto {
+    return {
+      id: entity.id.toString(),
+      email: entity.email.value,
+      name: entity.name.value,
+      role: entity.role.toString(),
+      createdAt: entity.createdAt,
+      // Handle backwards compatibility
+      legacyField: this.mapLegacyField(entity)
+    };
+  }
+
+  private mapLegacyField(entity: UserEntity): string {
+    // Handle older versions of the API
+    if (entity.hasLegacyFormat()) {
+      return entity.getLegacyValue();
+    }
+    return this.convertToLegacyFormat(entity);
+  }
+
+  toOrm(entity: UserEntity): UserOrmModel {
+    return {
+      id: entity.id.toString(),
+      email: entity.email.value,
+      password: entity.password.value,
+      roles: entity.roles.map(r => r.toString()),
+    };
+  }
+
+  fromOrm(ormModel: UserOrmModel): UserEntity {
+    return new UserEntity({
+      id: new UserId(ormModel.id),
+      email: new Email(ormModel.email),
+      password: new HashedPassword(ormModel.password),
+    });
+  }
+}
+```
+
+## Error Handling
+
+### Domain Errors
+
+DO:
+- Create specific error types per domain
+- Include relevant error context
+- Use proper error hierarchies
+- Handle errors at appropriate levels
+
+Example:
+```typescript
+// domains/user/errors/index.ts
+export class UserDomainError extends Error {
+  constructor(message: string) {
+    super(`[UserDomain] ${message}`);
+  }
+}
+
+export class EmailAlreadyExistsError extends UserDomainError {
+  constructor(email: string) {
+    super(`Email ${email} is already registered`);
+  }
+}
+```
+
+## Testing Requirements
+
+### Unit Tests
+
+DO:
+- Test business logic in isolation
+- Mock external dependencies
+- Cover edge cases
+- Test domain rules
+
+Example:
+```typescript
+// @server/domains/user/services/user.service.test.ts
+describe('UserDomainService', () => {
+  it('enforces business rules', async () => {
+    const service = new UserDomainService(mockRepo);
+    await expect(
+      service.createUser(invalidData)
+    ).rejects.toThrow(DomainError);
+  });
+});
+```
+
+### Integration Tests
+
+DO:
+- Test complete flows
+- Verify persistence
+- Test authorization
+- Use test databases
+
+Example:
+```typescript
+// @server/app-services/user-registration.test.ts
+describe('UserRegistration', () => {
+  it('completes full registration flow', async () => {
+    const result = await service.register(userData);
+    expect(result.user).toBeDefined();
+    expect(emailService.sent).toBe(true);
+  });
+});
+```
+# Checklist
+When creating a new domain, ensure you have:
+1. [ ] Created the domain folder structure
+2. [ ] Defined the domain entities and their relationships
+3. [ ] Implemented the repository with proper ORM mappings
+4. [ ] Created DTOs for input validation and output
+5. [ ] Implemented mappers for ORM and DTO conversion
+6. [ ] Created the domain service with business logic
+7. [ ] Added the controller if needed
+8. [ ] Written unit tests for the domain logic
+9. [ ] Added integration tests for the repository
+10. [ ] Updated the dependency injection container
